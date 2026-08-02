@@ -48,10 +48,13 @@ jobs:
     environment: release
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      # This job imports the Developer ID private key, so every third-party
+      # action is pinned to a full commit SHA. A mutable tag could be moved to
+      # code that exfiltrates the key. Dependabot bumps these.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Select Xcode
-        uses: maxim-lobanov/setup-xcode@v1
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
         with:
           xcode-version: latest-stable
 
@@ -176,7 +179,7 @@ jobs:
           fi
 
       - name: Create Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: ${{ steps.v.outputs.tag }}
           files: ${{ env.ZIP }}
