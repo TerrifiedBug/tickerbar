@@ -8,8 +8,11 @@ All notable changes to TickerBar will be documented in this file.
 
 ### Changed
 - Releases are now signed with an Apple Developer ID certificate and notarized by Apple. macOS no longer blocks the first launch, so the `xattr -dr com.apple.quarantine` workaround is gone.
-- Signing is now done by `xcodebuild` archive and export instead of a hand-rolled `codesign --deep`. The previous command signed the raw entitlements file, which left the literal string `$(PRODUCT_BUNDLE_IDENTIFIER)-spks` in the sandboxed app's mach-lookup exceptions rather than the real service name. Sparkle's installer XPC services are now signed inside-out with their own entitlements.
+- Signing is now done by `xcodebuild` archive and export instead of `codesign --deep`. Sparkle documents `--deep` as a common source of signing errors, because the XPC services it bundles have different requirements from the rest of the app. Sparkle's framework, updater and helper tools are now signed inside-out.
 - The repository moved to `TerrifiedBug/tickerbar` and the release asset is now `tickerbar.zip`. GitHub redirects the old paths, so existing installs keep updating.
+
+### Removed
+- Dropped the App Sandbox entitlements and the sandbox-only Sparkle installer service. No released build was ever sandboxed, because the old ad-hoc signing step applied no entitlements at all. Signing correctly would have switched the sandbox on for the first time and moved preferences into `~/Library/Containers`, losing every existing watchlist, holding and alert. TickerBar ships through Developer ID rather than the App Store, where the sandbox is optional.
 
 ## [1.4.1] - 2026-07-13
 

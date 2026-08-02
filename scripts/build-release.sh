@@ -5,14 +5,18 @@
 # run and a CI run produce the same artifact.
 #
 # Signing is delegated to xcodebuild rather than a hand-rolled
-# `codesign --deep`. TickerBar is sandboxed and its entitlements reference
-# $(PRODUCT_BUNDLE_IDENTIFIER) for Sparkle's installer XPC mach-lookup
-# exceptions. codesign does not expand build settings, so signing the raw
-# .entitlements file by hand bakes in a literal
-# "$(PRODUCT_BUNDLE_IDENTIFIER)-spks" and the sandboxed updater cannot reach
-# its XPC services. xcodebuild expands it, and signs nested code
-# (Sparkle.framework, Updater.app, Installer.xpc, Downloader.xpc) inside-out
-# with each target's own entitlements.
+# `codesign --deep`. Sparkle's own docs are explicit that --deep is "a common
+# source of Sandboxing errors" and must not be used, because the bundled XPC
+# services have different signing requirements from the rest of the bundle.
+# Archive + export signs Sparkle.framework, Updater.app, Autoupdate and the
+# XPC services inside-out, preserves the hardened runtime and strips
+# get-task-allow, which is the workflow Sparkle recommends.
+#
+# TickerBar is deliberately NOT sandboxed. It ships via Developer ID only,
+# never the App Store, so the sandbox is optional. Enabling it would move
+# preferences into ~/Library/Containers and orphan the watchlist, holdings
+# and alerts of every existing user, who all run unsandboxed builds. Do not
+# add an entitlements file back without a data migration.
 #
 # Configuration, all via environment:
 #   VERSION          release version, e.g. 1.5.0 (default: read from Info.plist)
