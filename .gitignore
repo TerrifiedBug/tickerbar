@@ -14,3 +14,6 @@ DerivedData/
 # Internal docs
 docs/
 plans/
+
+# Release artifacts
+dist/

@@ -7,7 +7,7 @@
 <p align="center">A free macOS menu bar app for keeping an eye on stocks. No subscription and no paid tier.</p>
 
 <p align="center">
-  <a href="https://github.com/TerrifiedBug/TickerBar/releases"><img src="https://img.shields.io/github/downloads/TerrifiedBug/TickerBar/total" alt="GitHub release downloads"></a>
+  <a href="https://github.com/TerrifiedBug/tickerbar/releases"><img src="https://img.shields.io/github/downloads/TerrifiedBug/tickerbar/total" alt="GitHub release downloads"></a>
 </p>
 
 <p align="center">
@@ -52,27 +52,21 @@ Trusting the whole tap applies to every current and future formula, cask, and co
 
 ### Manual download
 
-1. Download `TickerBar.zip` from the [latest release](https://github.com/TerrifiedBug/TickerBar/releases/latest).
+1. Download `tickerbar.zip` from the [latest release](https://github.com/TerrifiedBug/tickerbar/releases/latest).
 2. Unzip it and move `TickerBar.app` into Applications.
 3. Open TickerBar from Applications.
 
 ### First launch on macOS
 
-TickerBar currently uses ad hoc signing instead of a paid Apple Developer ID, so macOS may block the first launch. Control-click `TickerBar.app` in Applications, choose **Open**, then confirm **Open** in the dialog.
-
-If macOS still blocks it, remove the quarantine flag:
-
-```bash
-xattr -dr com.apple.quarantine /Applications/TickerBar.app
-```
+TickerBar is signed with an Apple Developer ID certificate and notarized by Apple. It opens straight from Applications with no Gatekeeper prompt and no quarantine workaround.
 
 ## Build it yourself
 
 You need Xcode 15 or newer and macOS 14 or newer.
 
 ```bash
-git clone https://github.com/TerrifiedBug/TickerBar.git
-cd TickerBar
+git clone https://github.com/TerrifiedBug/tickerbar.git
+cd tickerbar
 xcodebuild -project TickerBar.xcodeproj -scheme TickerBar -configuration Release -derivedDataPath build build
 ```
 

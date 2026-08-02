@@ -6,11 +6,10 @@ final class UpdateChecker: ObservableObject {
     let updaterController: SPUStandardUpdaterController
 
     init() {
-        // Always run Sparkle — including for Homebrew installs. The app is
-        // notarization-agnostic here; the cask sets `auto_updates true` so brew
-        // defers to Sparkle instead of fighting it. (Previously this disabled
-        // Sparkle whenever a /Caskroom/tickerbar dir existed, which left brew
-        // users with no way to update from inside the app.)
+        // Always run Sparkle, including for Homebrew installs. The cask sets
+        // `auto_updates true` so brew defers to Sparkle instead of fighting
+        // it. (This used to disable Sparkle whenever a /Caskroom/tickerbar
+        // dir existed, which left brew users no way to update in-app.)
         updaterController = SPUStandardUpdaterController(
             startingUpdater: true,
             updaterDelegate: nil,
