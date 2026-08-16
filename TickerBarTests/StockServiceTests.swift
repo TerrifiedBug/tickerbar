@@ -567,6 +567,68 @@ final class StockServiceTests: XCTestCase {
         XCTAssertEqual(service.currentDisplayStock?.symbol, "B")
     }
 
+    // MARK: - Refresh scheduling
+
+    func testClosedMarketsSlowTheCadenceInsteadOfStoppingRefreshes() {
+        // The bug this defends: refreshes used to be skipped outright whenever
+        // no session was active. The skip was decided from the cached
+        // `marketState`, which only a fetch can update, so the first closed
+        // session froze the app until it was relaunched — it never noticed the
+        // market reopening. A closed market must only slow the cadence.
+        let service = StockService(defaults: defaults)
+        var a = stock("A", price: 1); a.marketState = "CLOSED"
+        var b = stock("B", price: 2); b.marketState = "CLOSED"
+        service.stocks = [a, b]
+
+        XCTAssertFalse(service.anyMarketActive)
+        XCTAssertEqual(service.refreshCadence, StockService.idleRefreshInterval)
+        XCTAssertEqual(service.nextRefreshDelay, StockService.idleRefreshInterval)
+
+        // Yahoo reports the reopening on the next idle tick, and the cadence
+        // tightens back to the user's interval without a relaunch.
+        b.marketState = "REGULAR"
+        service.stocks = [a, b]
+        XCTAssertEqual(service.refreshCadence, service.refreshInterval)
+    }
+
+    func testExtendedSessionKeepsTheFastCadenceWhenEnabled() {
+        let service = StockService(defaults: defaults)
+        var post = stock("A", price: 1); post.marketState = "POST"
+        service.stocks = [post]
+
+        XCTAssertEqual(service.refreshCadence, StockService.idleRefreshInterval)
+        service.extendedHoursEnabled = true
+        XCTAssertEqual(service.refreshCadence, service.refreshInterval)
+    }
+
+    func testSlowUserIntervalIsNeverOverriddenByIdleCadence() {
+        let service = StockService(defaults: defaults)
+        service.refreshInterval = StockService.idleRefreshInterval * 2
+        var closed = stock("A", price: 1); closed.marketState = "CLOSED"
+        service.stocks = [closed]
+
+        XCTAssertEqual(service.refreshCadence, service.refreshInterval)
+    }
+
+    func testRefreshDelayRetriesFastThenReturnsToCadence() {
+        let idle = StockService.idleRefreshInterval
+        XCTAssertEqual(StockService.refreshDelay(cadence: idle, consecutiveFailures: 0), idle)
+        XCTAssertEqual(StockService.refreshDelay(cadence: idle, consecutiveFailures: 1), 5)
+        XCTAssertEqual(StockService.refreshDelay(cadence: idle, consecutiveFailures: 2), 15)
+        XCTAssertEqual(StockService.refreshDelay(cadence: idle, consecutiveFailures: 3), 60)
+
+        // Retries are spent: fall back to the cadence rather than hammering a
+        // provider that is having a bad day.
+        XCTAssertEqual(StockService.refreshDelay(cadence: idle, consecutiveFailures: 4), idle)
+        XCTAssertEqual(StockService.refreshDelay(cadence: idle, consecutiveFailures: 99), idle)
+    }
+
+    func testRefreshDelayNeverRetriesSlowerThanTheCadence() {
+        // A 30s cadence must not be pushed out to the 60s backoff step.
+        XCTAssertEqual(StockService.refreshDelay(cadence: 30, consecutiveFailures: 3), 30)
+        XCTAssertEqual(StockService.refreshDelay(cadence: 30, consecutiveFailures: 1), 5)
+    }
+
     // MARK: - Rotation index sync
 
     func testNormalizeDisplayIndexLandsOnOpenAndMatchesGetter() {
