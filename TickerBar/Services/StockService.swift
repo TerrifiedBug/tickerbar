@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import SwiftUI
 @preconcurrency import UserNotifications
@@ -20,7 +21,7 @@ final class StockService {
         didSet { defaults.set(displayNames, forKey: "displayNames") }
     }
     var refreshInterval: TimeInterval {
-        didSet { defaults.set(refreshInterval, forKey: "refreshInterval"); restartRefreshTimer() }
+        didSet { defaults.set(refreshInterval, forKey: "refreshInterval"); rescheduleRefreshIfRunning() }
     }
     var rotationEnabled: Bool {
         didSet { defaults.set(rotationEnabled, forKey: "rotationEnabled"); restartRotationTimer() }
@@ -98,8 +99,30 @@ final class StockService {
     }
 
     // MARK: - Timers
+    //
+    // The refresh timer is a one-shot that re-arms itself after every fetch, so
+    // its cadence always reflects the market state the fetch just observed.
+    // A repeating timer plus a "skip the fetch while markets are closed" gate
+    // deadlocks: the gate reads `marketState`, and only a fetch can update it,
+    // so the first closed session freezes the app for the rest of its life.
     private var refreshTimer: Timer?
     private var rotationTimer: Timer?
+    private var isScheduling = false
+    private var wakeObserver: NSObjectProtocol?
+    private var inFlightFetch: Task<Bool, Never>?
+    private var consecutiveFailures = 0
+
+    /// Cadence used when no watchlist session is live. Long enough to cost
+    /// nothing (96 fetches a day) but short enough that the next session — or a
+    /// holiday the local-clock heuristic cannot know about — is picked up soon
+    /// after Yahoo reports it.
+    static let idleRefreshInterval: TimeInterval = 15 * 60
+
+    /// Bounded fast retries, so a fetch that failed only because the network
+    /// wasn't up yet (the usual case moments after wake) recovers in seconds
+    /// instead of waiting out a whole cadence. Beyond the last step the normal
+    /// cadence takes over, so a long Yahoo outage can't turn into a hot loop.
+    nonisolated static let failureBackoff: [TimeInterval] = [5, 15, 60]
 
     // MARK: - Networking (all Yahoo HTTP/auth/parse lives in YahooFinanceClient)
     private let api = YahooFinanceClient()
@@ -275,13 +298,41 @@ final class StockService {
         return stocks.contains(where: isDisplayActive)
     }
 
-    func fetchAllQuotes(isTimerTriggered: Bool = false) async {
-        // Timer refreshes pause only when every supported session is closed.
-        // Manual refreshes, initial load, and add-stock fetches always proceed.
-        if isTimerTriggered && !anyMarketActive {
+    /// Fetches every watchlist quote, then re-arms the refresh timer for the
+    /// market state that fetch observed. Concurrent callers — timer, wake,
+    /// popover, manual button — coalesce onto the one in-flight fetch. Returns
+    /// false when the fetch failed outright and last-good data was kept.
+    @discardableResult
+    func fetchAllQuotes() async -> Bool {
+        if let inFlightFetch { return await inFlightFetch.value }
+        let fetch = Task { @MainActor in await performFetch() }
+        inFlightFetch = fetch
+        let succeeded = await fetch.value
+        inFlightFetch = nil
+
+        if succeeded {
+            consecutiveFailures = 0
+        } else if consecutiveFailures <= Self.failureBackoff.count {
+            consecutiveFailures += 1
+        }
+        rescheduleRefreshIfRunning()
+        return succeeded
+    }
+
+    /// Refresh only when the displayed data has aged past one refresh interval.
+    /// Called as the watchlist opens, so what you actually look at is current
+    /// even while the slow idle cadence is running.
+    func refreshIfStale() async {
+        guard let lastUpdated else {
+            await fetchAllQuotes()
             return
         }
+        if Date().timeIntervalSince(lastUpdated) >= refreshInterval {
+            await fetchAllQuotes()
+        }
+    }
 
+    private func performFetch() async -> Bool {
         isLoading = true
 
         // Ensure we have a valid crumb before fetching
@@ -290,7 +341,7 @@ final class StockService {
         } catch {
             errorMessage = "Authentication failed"
             isLoading = false
-            return
+            return false
         }
 
         let symbols = watchlist
@@ -341,7 +392,7 @@ final class StockService {
                 errorMessage = "Couldn't refresh — showing last update"
                 api.invalidateAuth()
                 isLoading = false
-                return
+                return false
             }
 
             // Fetch v7 quote data for pre/post market prices (single batch call)
@@ -401,6 +452,7 @@ final class StockService {
         lastUpdated = Date()
         isLoading = false
         checkPriceAlerts()
+        return true
     }
 
     /// Merge freshly-fetched quotes with the previous snapshot, preserving
@@ -693,39 +745,96 @@ final class StockService {
     // MARK: - Timer Management
 
     func startTimers() {
-        restartRefreshTimer()
+        isScheduling = true
+        observeWake()
         restartRotationTimer()
 
-        // Initial fetch
+        // The initial fetch arms the refresh timer for whatever it observes.
         Task { @MainActor in
             await fetchAllQuotes()
         }
     }
 
     func stopTimers() {
+        isScheduling = false
         refreshTimer?.invalidate()
         rotationTimer?.invalidate()
         refreshTimer = nil
         rotationTimer = nil
+        if let wakeObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver)
+            self.wakeObserver = nil
+        }
     }
 
-    private func restartRefreshTimer() {
-        refreshTimer?.invalidate()
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: refreshInterval, repeats: true) { [weak self] _ in
+    /// Waking leaves the quotes stale by however long the lid was shut, and the
+    /// pending one-shot is overdue rather than aligned to the new wall clock.
+    /// Fetch straight away and let that fetch re-anchor the cadence.
+    private func observeWake() {
+        guard wakeObserver == nil else { return }
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
             Task { @MainActor in
-                await self?.fetchAllQuotes(isTimerTriggered: true)
+                await self?.fetchAllQuotes()
             }
         }
+    }
+
+    /// The cadence the market state observed by the last fetch calls for. A
+    /// closed market only slows refreshes down; it never stops them, so
+    /// `marketState` is always re-read and a reopening is always noticed. The
+    /// user's interval always wins when it is slower than the idle cadence.
+    var refreshCadence: TimeInterval {
+        anyMarketActive ? refreshInterval : max(refreshInterval, Self.idleRefreshInterval)
+    }
+
+    /// How long until the next refresh. Failures pull the next attempt in to a
+    /// bounded retry — never past the cadence, since retrying slower than the
+    /// normal rhythm helps nobody — and once the retries are spent the cadence
+    /// takes back over, so an outage can't become a hot loop.
+    nonisolated static func refreshDelay(cadence: TimeInterval, consecutiveFailures: Int) -> TimeInterval {
+        guard consecutiveFailures > 0, consecutiveFailures <= failureBackoff.count else { return cadence }
+        return min(failureBackoff[consecutiveFailures - 1], cadence)
+    }
+
+    var nextRefreshDelay: TimeInterval {
+        Self.refreshDelay(cadence: refreshCadence, consecutiveFailures: consecutiveFailures)
+    }
+
+    private func rescheduleRefreshIfRunning() {
+        guard isScheduling else { return }
+        refreshTimer?.invalidate()
+
+        let delay = nextRefreshDelay
+        let timer = Timer(timeInterval: delay, repeats: false) { [weak self] _ in
+            Task { @MainActor in
+                await self?.fetchAllQuotes()
+            }
+        }
+        // Correctness comes from re-arming after each fetch, not from firing on
+        // an exact second, so let the OS coalesce this wakeup with others.
+        timer.tolerance = min(delay * 0.1, 30)
+        // `.common` so a refresh still lands while the watchlist popover is up:
+        // its menu-tracking run loop doesn't service `.default`-only timers.
+        RunLoop.main.add(timer, forMode: .common)
+        refreshTimer = timer
     }
 
     private func restartRotationTimer() {
         rotationTimer?.invalidate()
         guard rotationEnabled else { return }
-        rotationTimer = Timer.scheduledTimer(withTimeInterval: rotationSpeed, repeats: true) { [weak self] _ in
+
+        let timer = Timer(timeInterval: rotationSpeed, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.advanceDisplay()
             }
         }
+        timer.tolerance = min(rotationSpeed * 0.1, 1)
+        RunLoop.main.add(timer, forMode: .common)
+        rotationTimer = timer
     }
 
 }

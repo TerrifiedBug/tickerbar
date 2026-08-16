@@ -4,6 +4,15 @@ All notable changes to TickerBar will be documented in this file.
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-08-16
+
+### Fixed
+- Quotes keep refreshing after a market closes. Timer refreshes were skipped whenever no watchlist session was live, but that decision read the market state cached by the last fetch — and only a fetch could update it. The first closed session therefore froze the app for the rest of its life: it never noticed the market reopening, so the menu bar kept showing a price from hours or days earlier until TickerBar was relaunched. A closed market now only slows the cadence to every 15 minutes rather than stopping refreshes, so reopenings, holidays and half-days are all picked up without help.
+- Waking the Mac refreshes straight away, instead of showing the prices from before it went to sleep until the next scheduled tick.
+- The watchlist tops up quotes that have aged past one refresh interval as its panel appears, so what you open is not showing stale numbers.
+- A failed refresh is retried after 5, 15 and 60 seconds before falling back to the normal cadence. The refresh moments after wake usually fails because the network isn't up yet, and that attempt used to cost a whole interval.
+- Refresh and rotation now run in the common run loop modes, so both keep ticking while the watchlist panel is open. Both also carry a wakeup tolerance, letting macOS coalesce them with other timers instead of waking the CPU on their own.
+
 ## [1.5.0] - 2026-08-02
 
 ### Changed

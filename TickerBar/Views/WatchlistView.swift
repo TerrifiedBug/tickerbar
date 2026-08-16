@@ -450,6 +450,9 @@ struct WatchlistView: View {
             }
         }
         .frame(width: 300)
+        // Opening the watchlist is a direct request to look at the numbers, so
+        // top them up if the idle cadence has let them age past one interval.
+        .task { await service.refreshIfStale() }
         .background(service.solidPopoverBackground ? Color(nsColor: .windowBackgroundColor) : Color.clear)
         .background(
             // Measure the content's settled height in SwiftUI space and feed it
