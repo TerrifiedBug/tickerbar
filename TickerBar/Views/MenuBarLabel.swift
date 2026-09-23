@@ -3,6 +3,7 @@ import AppKit
 
 struct MenuBarLabel: View {
     let service: StockService
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         if let stock = service.currentDisplayStock {
@@ -74,9 +75,7 @@ struct MenuBarLabel: View {
         let height = max(22, ceil(totalTextHeight))
         let yOffset = (height - totalTextHeight) / 2
 
-        // Resolve dynamic colors against the system (menu bar) appearance so the
-        // text stays legible in both Light and Dark mode.
-        let appearance = NSApp.effectiveAppearance
+        let appearance = menuBarAppearance
         let image = NSImage(size: NSSize(width: ceil(width), height: height), flipped: false) { _ in
             appearance.performAsCurrentDrawingAppearance {
                 // Line 2 at bottom (flipped=false means origin is bottom-left)
@@ -146,8 +145,7 @@ struct MenuBarLabel: View {
         let height = max(22, ceil(textSize.height))
         let yOffset = (height - textSize.height) / 2
 
-        // Resolve dynamic colors against the system (menu bar) appearance.
-        let appearance = NSApp.effectiveAppearance
+        let appearance = menuBarAppearance
         let image = NSImage(size: NSSize(width: ceil(textSize.width), height: height), flipped: false) { _ in
             appearance.performAsCurrentDrawingAppearance {
                 str.draw(at: NSPoint(x: 0, y: yOffset))
@@ -157,5 +155,13 @@ struct MenuBarLabel: View {
 
         image.isTemplate = false
         return image
+    }
+
+    // The menu bar's appearance follows the wallpaper, not the system Light/Dark
+    // setting, so NSApp.effectiveAppearance is wrong e.g. in Light mode with a
+    // dark wallpaper. The label's color scheme tracks the menu bar itself, and
+    // SwiftUI re-renders the label when it changes.
+    private var menuBarAppearance: NSAppearance {
+        NSAppearance(named: colorScheme == .dark ? .darkAqua : .aqua)!
     }
 }
