@@ -4,6 +4,8 @@ All notable changes to TickerBar will be documented in this file.
 
 ## [Unreleased]
 
+## [1.5.2] - 2026-09-23
+
 ### Fixed
 - Menu bar text is legible on a dark menu bar while macOS is in Light mode (#24). The menu bar's appearance follows the wallpaper rather than the system setting, but the text color was resolved against the app's (system) appearance, so a Light-mode Mac with a dark wallpaper drew black text on a dark bar. Colors now follow the menu bar itself, and still turn dark on a light menu bar.
 
